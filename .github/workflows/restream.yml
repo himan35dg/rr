@@ -1,4 +1,4 @@
-name: Restream via Ngrok (HLS)
+name: Rebroadcast HLS with Cloudflare Tunnel
 
 on:
   workflow_dispatch:
@@ -7,39 +7,33 @@ jobs:
   stream:
     runs-on: ubuntu-latest
     steps:
-      - name: Install dependencies
+      - name: Checkout Repo
+        uses: actions/checkout@v3
+
+      - name: Install FFmpeg & Cloudflared
         run: |
           sudo apt-get update
-          sudo apt-get install -y ffmpeg unzip wget python3
+          sudo apt-get install -y ffmpeg wget unzip
+          wget https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb
+          sudo dpkg -i cloudflared-linux-amd64.deb
 
-      - name: Install ngrok
-        run: |
-          wget https://bin.equinox.io/c/bNyj1mQVY4c/ngrok-stable-linux-amd64.zip
-          unzip ngrok-stable-linux-amd64.zip
-          sudo mv ngrok /usr/local/bin
-          ngrok authtoken ${{ secrets.NGROK_TOKEN }}
-
-      - name: Start HLS restream
+      - name: Prepare HLS Output
         run: |
           mkdir -p hls
-          # ffmpeg يطلع HLS طول ما الـ workflow شغال
-          ffmpeg -re -i "http://cyberfamily.sytes.net/live/hussein727/hussein/351.ts" \
-            -c copy -f hls -hls_time 4 -hls_list_size 10 -hls_flags delete_segments hls/stream.m3u8 > ffmpeg.log 2>&1 &
+          ffmpeg -i "http://cyberfamily.sytes.net/live/hussein727/hussein/351.ts" \
+            -c copy -f hls -hls_time 5 -hls_list_size 6 -hls_flags delete_segments hls/stream.m3u8 &
 
-          # سيرفر محلي يقدم ملفات HLS
-          nohup python3 -m http.server 8080 --directory hls > server.log 2>&1 &
+      - name: Start Local Web Server
+        run: |
+          nohup python3 -m http.server 8080 --directory hls &
 
-          # ngrok يفتح بورت HTTP
-          ngrok http 8080 --log=stdout > ngrok.log &
+      - name: Run Cloudflare Tunnel
+        run: |
+          cloudflared tunnel --url http://localhost:8080 > cf.log 2>&1 &
           sleep 10
-          cat ngrok.log | grep -o "https://[0-9a-z]*\.ngrok-free.app" > public_url.txt
+          cat cf.log | grep -o "https://.*trycloudflare.com" | head -n 1 > public_url.txt
 
-      - name: Show public HLS link
+      - name: Show Public Stream URL
         run: |
           url=$(cat public_url.txt)
           echo "🔗 HLS Playlist: $url/stream.m3u8"
-
-      - name: Keep alive
-        run: |
-          echo "Workflow running..."
-          sleep 21600 # 6 ساعات
