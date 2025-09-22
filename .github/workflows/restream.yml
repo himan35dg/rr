@@ -1,0 +1,34 @@
+name: Restream via Ngrok
+
+on:
+  workflow_dispatch:
+
+jobs:
+  stream:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Install deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg unzip wget
+
+      - name: Install ngrok
+        run: |
+          wget https://bin.equinox.io/c/bNyj1mQVY4c/ngrok-stable-linux-amd64.zip
+          unzip ngrok-stable-linux-amd64.zip
+          sudo mv ngrok /usr/local/bin
+          ngrok authtoken ${{ secrets.NGROK_TOKEN }}
+
+      - name: Start local RTMP server with ffmpeg
+        run: |
+          # شغل ffmpeg يقرأ من الرابط
+          ffmpeg -re -i "http://cyberfamily.sytes.net/live/hussein727/hussein/351.ts" \
+            -c copy -f flv "rtmp://127.0.0.1:1935/live/stream" &
+          
+          # افتح tunnel على بورت 1935
+          ngrok tcp 1935 --log=stdout > ngrok.log &
+          sleep 10
+          cat ngrok.log | grep -o "tcp://[0-9a-z]*\.tcp.ngrok.io:[0-9]*" > public_url.txt
+
+      - name: Show public URL
+        run: cat public_url.txt
