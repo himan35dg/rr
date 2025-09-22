@@ -22,14 +22,14 @@ jobs:
       - name: Start HLS restream
         run: |
           mkdir -p hls
-          # ffmpeg يشغل المصدر طول ما الـ workflow شغال
+          # ffmpeg يطلع HLS طول ما الـ workflow شغال
           ffmpeg -re -i "http://cyberfamily.sytes.net/live/hussein727/hussein/351.ts" \
             -c copy -f hls -hls_time 4 -hls_list_size 10 -hls_flags delete_segments hls/stream.m3u8 > ffmpeg.log 2>&1 &
 
-          # سيرفر محلي بالبايثون
+          # سيرفر محلي يقدم ملفات HLS
           nohup python3 -m http.server 8080 --directory hls > server.log 2>&1 &
 
-          # ngrok على بورت 8080
+          # ngrok يفتح بورت HTTP
           ngrok http 8080 --log=stdout > ngrok.log &
           sleep 10
           cat ngrok.log | grep -o "https://[0-9a-z]*\.ngrok-free.app" > public_url.txt
@@ -41,5 +41,5 @@ jobs:
 
       - name: Keep alive
         run: |
-          echo "Workflow running... (Ctrl+C لإيقافه من GitHub Actions)"
+          echo "Workflow running..."
           sleep 21600 # 6 ساعات
