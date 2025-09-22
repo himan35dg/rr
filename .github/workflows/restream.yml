@@ -1,4 +1,4 @@
-name: Restream via Ngrok
+name: Restream via Ngrok (HLS)
 
 on:
   workflow_dispatch:
@@ -7,10 +7,10 @@ jobs:
   stream:
     runs-on: ubuntu-latest
     steps:
-      - name: Install deps
+      - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y ffmpeg unzip wget
+          sudo apt-get install -y ffmpeg unzip wget python3
 
       - name: Install ngrok
         run: |
@@ -19,16 +19,27 @@ jobs:
           sudo mv ngrok /usr/local/bin
           ngrok authtoken ${{ secrets.NGROK_TOKEN }}
 
-      - name: Start local RTMP server with ffmpeg
+      - name: Start HLS restream
         run: |
-          # شغل ffmpeg يقرأ من الرابط
+          mkdir -p hls
+          # ffmpeg يشغل المصدر طول ما الـ workflow شغال
           ffmpeg -re -i "http://cyberfamily.sytes.net/live/hussein727/hussein/351.ts" \
-            -c copy -f flv "rtmp://127.0.0.1:1935/live/stream" &
-          
-          # افتح tunnel على بورت 1935
-          ngrok tcp 1935 --log=stdout > ngrok.log &
-          sleep 10
-          cat ngrok.log | grep -o "tcp://[0-9a-z]*\.tcp.ngrok.io:[0-9]*" > public_url.txt
+            -c copy -f hls -hls_time 4 -hls_list_size 10 -hls_flags delete_segments hls/stream.m3u8 > ffmpeg.log 2>&1 &
 
-      - name: Show public URL
-        run: cat public_url.txt
+          # سيرفر محلي بالبايثون
+          nohup python3 -m http.server 8080 --directory hls > server.log 2>&1 &
+
+          # ngrok على بورت 8080
+          ngrok http 8080 --log=stdout > ngrok.log &
+          sleep 10
+          cat ngrok.log | grep -o "https://[0-9a-z]*\.ngrok-free.app" > public_url.txt
+
+      - name: Show public HLS link
+        run: |
+          url=$(cat public_url.txt)
+          echo "🔗 HLS Playlist: $url/stream.m3u8"
+
+      - name: Keep alive
+        run: |
+          echo "Workflow running... (Ctrl+C لإيقافه من GitHub Actions)"
+          sleep 21600 # 6 ساعات
