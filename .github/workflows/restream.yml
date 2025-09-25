@@ -6,6 +6,7 @@ on:
 jobs:
   stream:
     runs-on: ubuntu-latest
+    timeout-minutes: 360
 
     steps:
       - name: Checkout
@@ -14,36 +15,84 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt update
-          sudo apt install -y ffmpeg python3 unzip
+          sudo apt install -y ffmpeg python3 unzip wget ca-certificates
 
       - name: Download cloudflared
         run: |
-          wget https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb
-          sudo dpkg -i cloudflared-linux-amd64.deb
+          wget -q https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb
+          sudo dpkg -i cloudflared-linux-amd64.deb || true
+          # If dpkg didn't place executable, fallback to curl extract (some runners)
+          if ! command -v cloudflared >/dev/null 2>&1; then
+            mkdir -p /tmp/cf && cd /tmp/cf
+            wget -q https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64
+            chmod +x cloudflared-linux-amd64
+            sudo mv cloudflared-linux-amd64 /usr/local/bin/cloudflared
+          fi
+          cloudflared --version
 
       - name: Prepare HLS folder
-        run: mkdir -p hls
+        run: |
+          mkdir -p hls
 
       - name: Run FFmpeg (TS ➝ HLS)
         run: |
-          ffmpeg -i "http://cyberfamily.sytes.net:80/hussein790/hussein/499" \
+          set -o pipefail
+          ffmpeg -hide_banner -loglevel info -i "http://cyberfamily.sytes.net:80/hussein790/hussein/499" \
             -c:v copy -c:a copy \
             -f hls -hls_time 5 -hls_list_size 6 -hls_flags delete_segments \
             hls/stream.m3u8 > ffmpeg.log 2>&1 &
 
       - name: Run Python HTTP server in hls folder
         run: |
-          cd hls && python3 -m http.server 8080 > ../server.log 2>&1 &
+          cd hls
+          # run simple HTTP server in background, detach with nohup so it survives in job
+          nohup python3 -m http.server 8080 > ../server.log 2>&1 &
 
-      - name: Run Cloudflare Tunnel
+      - name: Run Cloudflare Tunnel and capture URL(s)
         run: |
-          cloudflared tunnel --url http://localhost:8080 > cf.log 2>&1 &
-          sleep 5
-          grep -o "https://.*trycloudflare.com" cf.log | head -n 1 > public_url.txt
+          # start tunnel in background and capture logs
+          nohup cloudflared tunnel --url http://localhost:8080 > cf.log 2>&1 &
+          # wait for cloudflared to print the URL (give it a bit more time)
+          sleep 10
 
-      - name: Show public URL
+          # extract all trycloudflare.com URLs into a temporary file (if any)
+          grep -Eo "https://[a-zA-Z0-9._-]+\.trycloudflare\.com" cf.log | sort -u > cf_urls.txt || true
+
+          # If multiple URLs found, pick one at random; if one found, use it; otherwise fallback to local ip
+          if [ -s cf_urls.txt ]; then
+            # choose a random line
+            SHUF_URL=$(shuf -n 1 cf_urls.txt)
+            echo "$SHUF_URL" > public_url.txt
+          else
+            # try to show last lines of cf.log for debugging
+            echo "no-cloudflared-url-found" > public_url.txt
+          fi
+
+          echo "=== CF LOG (last 50 lines) ==="
+          tail -n 50 cf.log || true
+          echo "=== END CF LOG ==="
+
+      - name: Determine final public URL and print result
         run: |
-          echo "🔗 HLS Playlist: $(cat public_url.txt)/stream.m3u8"
+          PF=$(cat public_url.txt)
+          if [ "$PF" = "no-cloudflared-url-found" ]; then
+            # fallback to runner local IP (GitHub-hosted runners have ephemeral NAT; this may not be reachable externally)
+            IP=$(hostname -I | awk '{print $1}' || echo "127.0.0.1")
+            echo "⚠️ Could not find a trycloudflare URL in cf.log."
+            echo "Local test URL (may not be publicly reachable): http://$IP:8080/stream.m3u8"
+            echo "See cf.log and server.log for debugging."
+          else
+            echo "🔗 HLS Playlist: ${PF}/stream.m3u8"
+          fi
+
+      - name: Show logs (short)
+        run: |
+          echo "---- ffmpeg.log (last 30 lines) ----"
+          tail -n 30 ffmpeg.log || true
+          echo "---- server.log (last 30 lines) ----"
+          tail -n 30 server.log || true
+          echo "---- cf.log (last 60 lines) ----"
+          tail -n 60 cf.log || true
 
       - name: Keep workflow alive
         run: |
