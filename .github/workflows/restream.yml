@@ -37,7 +37,7 @@ jobs:
       - name: Run FFmpeg (TS ➝ HLS)
         run: |
           set -o pipefail
-          ffmpeg -hide_banner -loglevel info -i "http://cyberfamily.sytes.net/live/hussein790/hussein/499.ts" \
+          ffmpeg -hide_banner -loglevel info -i "https://mo3ad.xyz:443/mo3ad511/mo3ad511/669.m3u8" \
             -c:v copy -c:a copy \
             -f hls -hls_time 5 -hls_list_size 6 -hls_flags delete_segments \
             hls/stream.m3u8 > ffmpeg.log 2>&1 &
